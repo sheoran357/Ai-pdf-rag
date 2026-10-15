@@ -1,4 +1,3 @@
-import React from "react";
 import { ChatProvider } from "./context/ChatContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import ChatPage from "./pages/ChatPage";

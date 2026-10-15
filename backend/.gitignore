@@ -1,4 +1,9 @@
-chroma_db/
 myenv/
-deepak_seminar.pdf
-sjf_readme.pdf
+.venv/
+chroma_db/
+app/chroma_stores/
+app/memory.json
+.env
+*.py[cod]
+__pycache__/
+*.pdf

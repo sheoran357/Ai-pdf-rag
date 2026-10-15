@@ -1,5 +1,5 @@
 {
-  "name": "pdf-chat-history",
+  "name": "ai-pdf-rag-chat-backend",
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.js",

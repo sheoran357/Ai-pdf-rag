@@ -1,6 +1,6 @@
-chroma_db/
-chroma_notes/
 chroma_stores/
-memory.js/
+chroma_db/
 __pycache__/
-api_test.py
+*.py[cod]
+memory.json
+*.pdf

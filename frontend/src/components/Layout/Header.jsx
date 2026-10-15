@@ -1,12 +1,11 @@
 // src/components/Layout/Header.jsx
-import React from "react";
 
 const Header = ({ openSettings }) => {
   return (
     <header className="border-b border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900">
       <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold tracking-tight text-black dark:text-white select-none">PDF Brian</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-black dark:text-white select-none">AI PDF RAG</h1>
           <span className="text-xs text-gray-500 dark:text-gray-400">Ask PDFs • Stream answers</span>
         </div>
 

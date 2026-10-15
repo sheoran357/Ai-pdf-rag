@@ -1,94 +1,110 @@
-// routes/chatRoutes.js
 import express from "express";
+import mongoose from "mongoose";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
 
 const router = express.Router();
 
-/* --------------------- CREATE NEW CHAT --------------------- */
 router.post("/new", async (req, res) => {
   try {
-    const chat = await Chat.create({
-      title: req.body.title || "New Chat",
-    });
-    res.json(chat);
-  } catch (err) {
-    console.error(" New chat error:", err);
-    res.status(500).json({ error: err.message });
+    const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+    const chat = await Chat.create({ title: title || "New Chat" });
+    res.status(201).json(chat);
+  } catch (error) {
+    console.error("Create chat failed:", error.message);
+    res.status(500).json({ error: "Could not create chat." });
   }
 });
 
-/* --------------------- LIST CHATS --------------------- */
-router.get("/", async (req, res) => {
+router.get("/", async (_req, res) => {
   try {
-    const chats = await Chat.find().sort({ updatedAt: -1 });
+    const chats = await Chat.find().sort({ updatedAt: -1 }).lean();
     res.json(chats);
-  } catch (err) {
-    console.error(" Load chats error:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("Load chats failed:", error.message);
+    res.status(500).json({ error: "Could not load chats." });
   }
 });
-
 
 router.get("/:chatId/messages", async (req, res) => {
-  try {
-    const msgs = await Message.find({
-      chatId: req.params.chatId,
-    }).sort({ timestamp: 1 });
+  const { chatId } = req.params;
+  if (!mongoose.isValidObjectId(chatId)) {
+    return res.status(400).json({ error: "Invalid chat ID." });
+  }
 
-    res.json(msgs);
-  } catch (err) {
-    console.error(" Load messages error:", err);
-    res.status(500).json({ error: err.message });
+  try {
+    const chatExists = await Chat.exists({ _id: chatId });
+    if (!chatExists) return res.status(404).json({ error: "Chat not found." });
+
+    const messages = await Message.find({ chatId }).sort({ timestamp: 1 }).lean();
+    res.json(messages);
+  } catch (error) {
+    console.error("Load messages failed:", error.message);
+    res.status(500).json({ error: "Could not load chat messages." });
   }
 });
-
 
 router.post("/message", async (req, res) => {
+  const { chatId, sender, text, timestamp, pdfName } = req.body || {};
+
+  if (!chatId || !mongoose.isValidObjectId(chatId)) {
+    return res.status(400).json({ error: "A valid chat ID is required." });
+  }
+  if (!["user", "bot"].includes(sender)) {
+    return res.status(400).json({ error: "Sender must be 'user' or 'bot'." });
+  }
+  if (typeof text !== "string" || !text.trim()) {
+    return res.status(400).json({ error: "Message text cannot be empty." });
+  }
+
   try {
-    const { chatId, sender, text, timestamp, pdfName } = req.body;
+    const chat = await Chat.findById(chatId);
+    if (!chat) return res.status(404).json({ error: "Chat not found." });
 
-    if (!chatId || !sender || !text) {
-      return res.status(400).json({ error: "Missing fields" });
-    }
-
-    const msg = await Message.create({
+    const message = await Message.create({
       chatId,
       sender,
-      text,
-      timestamp: timestamp || Date.now(),
-      pdfName: pdfName || "",   
+      text: text.trim(),
+      timestamp: Number.isFinite(Number(timestamp)) ? Number(timestamp) : Date.now(),
+      pdfName: typeof pdfName === "string" ? pdfName.slice(0, 255) : "",
     });
 
-    res.json(msg);
-  } catch (err) {
-    console.error("Save message error:", err);
-    res.status(500).json({ error: err.message });
+    // Keep the sidebar's updatedAt sort in sync with recent conversation activity.
+    chat.updatedAt = new Date();
+    await chat.save();
+
+    res.status(201).json(message);
+  } catch (error) {
+    console.error("Save message failed:", error.message);
+    res.status(500).json({ error: "Could not save the message." });
   }
 });
 
-
 router.patch("/:chatId", async (req, res) => {
+  const { chatId } = req.params;
+  const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+
+  if (!mongoose.isValidObjectId(chatId)) {
+    return res.status(400).json({ error: "Invalid chat ID." });
+  }
+  if (!title) {
+    return res.status(400).json({ error: "Title cannot be empty." });
+  }
+  if (title.length > 120) {
+    return res.status(400).json({ error: "Title must be 120 characters or fewer." });
+  }
+
   try {
-    const { title } = req.body;
-    if (!title || !title.trim()) {
-      return res.status(400).json({ error: "Title cannot be empty" });
-    }
-
     const updated = await Chat.findByIdAndUpdate(
-      req.params.chatId,
+      chatId,
       { title },
-      { new: true }
+      { new: true, runValidators: true }
     );
-
-    if (!updated) {
-      return res.status(404).json({ error: "Chat not found" });
-    }
-
+    if (!updated) return res.status(404).json({ error: "Chat not found." });
     res.json(updated);
-  } catch (err) {
-    console.error("Rename chat error:", err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("Rename chat failed:", error.message);
+    res.status(500).json({ error: "Could not rename chat." });
   }
 });
 

@@ -1,5 +1,5 @@
 // src/components/Sidebar/Sidebar.jsx
-import React, { useContext, useState, useEffect } from "react";
+import { useContext, useState } from "react";
 import { ChatContext } from "../../context/ChatContext";
 
 const Sidebar = () => {
@@ -12,15 +12,11 @@ const Sidebar = () => {
     pdfList,
     activePdf,
     setActivePdf,
-    loadPdfList,
     deletePdf,
   } = useContext(ChatContext);
 
   const [isOpen, setIsOpen] = useState(true);
 
-  useEffect(() => {
-    loadPdfList();
-  }, []);
 
   return (
     <aside
@@ -31,7 +27,9 @@ const Sidebar = () => {
       {/* Top Row */}
       <div className="flex items-center justify-between p-3">
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          type="button"
+          aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
+          onClick={() => setIsOpen((open) => !open)}
           className="p-2 hover:bg-gray-100 dark:hover:bg-neutral-800 rounded"
         >
           <svg
@@ -50,6 +48,7 @@ const Sidebar = () => {
         </button>
 
         <button
+          type="button"
           onClick={() => newChat()}
           className="px-2 py-1 rounded bg-black text-white dark:bg-white dark:text-black text-sm"
         >
@@ -85,6 +84,8 @@ const Sidebar = () => {
 
             {isOpen && (
               <button
+                type="button"
+                aria-label={`Rename ${chat.title}`}
                 className="opacity-0 group-hover:opacity-100 transition text-xs px-1 text-gray-500 hover:text-black dark:hover:text-white"
                 onClick={() => {
                   const newName = prompt("Rename chat:", chat.title);
@@ -124,6 +125,8 @@ const Sidebar = () => {
             </div>
 
             <button
+              type="button"
+              aria-label={`Delete ${p.filename}`}
               onClick={(e) => {
                 e.stopPropagation();
                 deletePdf(p.filename);

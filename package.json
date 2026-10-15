@@ -1,36 +1,31 @@
 {
-  "name": "ai-note-desktop",
+  "name": "ai-pdf-rag",
   "version": "1.0.0",
-  "description": "AI Note Desktop App",
-  "author": "You",
+  "description": "AI PDF RAG desktop and web application",
+  "author": "AI PDF RAG contributors",
   "main": "electron.js",
-
   "scripts": {
     "react": "npm run dev --prefix frontend",
     "electron": "electron .",
-    "dev": "concurrently \"npm run react\" \"npm run electron\"",
+    "dev": "concurrently -k -s first \"npm run react\" \"npm run node-backend\" \"npm run electron\"",
     "build-react": "npm run build --prefix frontend",
-    "build": "npm run build-react && electron-builder --win --x64"
+    "build": "npm run build-react && electron-builder --win --x64",
+    "node-backend": "npm run dev --prefix node-backend"
   },
-
   "devDependencies": {
     "electron": "^30.0.0",
     "concurrently": "^8.0.0",
     "electron-builder": "^24.0.0"
   },
-
   "build": {
     "appId": "ai.note.desktop",
-    "productName": "AI Note Desktop",
-
+    "productName": "AI PDF RAG",
     "directories": {
       "output": "dist"
     },
-
     "files": [
       "**/*"
     ],
-
     "extraResources": [
       {
         "from": "backend",
@@ -41,13 +36,11 @@
         "to": "frontend/dist"
       }
     ],
-
     "win": {
       "target": "nsis",
       "sign": null,
       "signAndEditExecutable": false
     },
-
     "forceCodeSigning": false,
     "cscLink": null,
     "cscKeyPassword": null,

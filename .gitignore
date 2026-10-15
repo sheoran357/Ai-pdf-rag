@@ -1,3 +1,39 @@
-node_modules
-dist
-.venv
+# Dependencies and build output
+node_modules/
+**/node_modules/
+dist/
+dist-ssr/
+coverage/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments and secrets
+.venv/
+venv/
+myenv/
+**/.env
+.env
+.env.*
+!**/.env.example
+!.env.example
+
+# Runtime data and local documents
+backend/app/chroma_stores/
+backend/app/memory.json
+backend/app/chroma_db/
+*.sqlite
+*.sqlite3
+*.db
+*.pdf
+
+# Logs and operating-system/editor files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

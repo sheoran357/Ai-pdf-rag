@@ -1,22 +1,35 @@
-import React from "react";
-
-const UploadButton = ({ onFileSelect }) => {
-  const handleChange = (e) => {
-    if (e.target.files[0]) {
-      onFileSelect(e.target.files[0]);
-    }
+const UploadButton = ({ onFileSelect, disabled = false }) => {
+  const handleChange = (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (selectedFile) onFileSelect(selectedFile);
+    // Let users choose the same file again after removing it or deleting its index.
+    event.target.value = "";
   };
 
   return (
-    <label className="cursor-pointer flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-200 dark:hover:bg-neutral-700">
-      <input type="file" className="hidden" onChange={handleChange} />
+    <label
+      title="Upload a PDF"
+      className={`flex h-8 w-8 items-center justify-center rounded-full ${
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-gray-200 dark:hover:bg-neutral-700"
+      }`}
+    >
+      <span className="sr-only">Upload a PDF</span>
+      <input
+        type="file"
+        disabled={disabled}
+        accept=".pdf,application/pdf"
+        className="hidden"
+        aria-label="Upload a PDF"
+        onChange={handleChange}
+      />
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        className="w-5 h-5 text-gray-700 dark:text-gray-300"
+        className="h-5 w-5 text-gray-700 dark:text-gray-300"
         fill="none"
         viewBox="0 0 24 24"
         strokeWidth="2"
         stroke="currentColor"
+        aria-hidden="true"
       >
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
       </svg>

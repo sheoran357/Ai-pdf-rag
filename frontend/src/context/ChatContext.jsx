@@ -1,338 +1,373 @@
-// src/context/ChatContext.js
-import { createContext, useState, useEffect } from "react";
+import { createContext, useCallback, useEffect, useRef, useState } from "react";
 
-export const ChatContext = createContext();
+export const ChatContext = createContext(null);
 
-const NODE_BASE = "http://localhost:5000";
-const PY_BACKEND = "http://localhost:8000";
+const NODE_BASE = (import.meta.env.VITE_NODE_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
+const PY_BACKEND = (import.meta.env.VITE_PYTHON_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
 const makeId = () => `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
-/* Save message to Node ---------------------------------------- */
-const saveMessageToNode = async (payload) => {
-  try {
-    const res = await fetch(`${NODE_BASE}/api/chat/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+async function readResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+  let data;
 
-    return await res.json();
-  } catch (err) {
-    console.error("saveMessageToNode error:", err);
-    return null;
+  if (contentType.includes("application/json")) {
+    data = await response.json();
+  } else {
+    data = await response.text();
   }
-};
 
-/* ------------------------------------------------------------- */
+  if (!response.ok) {
+    const message =
+      (data && typeof data === "object" && (data.detail || data.error || data.message)) ||
+      (typeof data === "string" && data) ||
+      `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+async function saveMessageToNode(payload) {
+  const response = await fetch(`${NODE_BASE}/api/chat/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readResponse(response);
+}
 
 export const ChatProvider = ({ children }) => {
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [messages, setMessages] = useState([]);
-
   const [pdfList, setPdfList] = useState([]);
   const [activePdf, setActivePdf] = useState("");
+  const skipNextMessagesLoad = useRef(null);
 
-  /* ------------------ Load Chats From Node ------------------ */
-  const loadChats = async () => {
+  const loadChats = useCallback(async () => {
     try {
-      const res = await fetch(`${NODE_BASE}/api/chat`);
-      const data = await res.json();
+      const response = await fetch(`${NODE_BASE}/api/chat`);
+      const data = await readResponse(response);
+      if (!Array.isArray(data)) throw new Error("The chat API returned an invalid response.");
 
-      const cleaned = data.map((c) => ({
-        id: c._id,
-        title: c.title,
+      const cleaned = data.map((chat) => ({
+        id: chat._id,
+        title: chat.title,
       }));
-
       setChats(cleaned);
-
-      if (!activeChatId && cleaned.length > 0) {
-        setActiveChatId(cleaned[0].id);
-      }
-    } catch (err) {
-      console.error("loadChats error:", err);
+      setActiveChatId((currentId) =>
+        currentId && cleaned.some((chat) => chat.id === currentId)
+          ? currentId
+          : cleaned[0]?.id || null
+      );
+    } catch (error) {
+      console.error("Could not load chats:", error);
     }
-  };
-
-  useEffect(() => {
-    loadChats();
   }, []);
 
-  /* ------------------ Load Messages For Chat ------------------ */
-  const loadMessagesForChat = async (chatId) => {
+  const loadPdfList = useCallback(async () => {
+    try {
+      const response = await fetch(`${PY_BACKEND}/list-pdfs`);
+      const data = await readResponse(response);
+      setPdfList(Array.isArray(data.pdfs) ? data.pdfs : []);
+    } catch (error) {
+      console.error("Could not load indexed PDFs:", error);
+    }
+  }, []);
+
+  const loadMessagesForChat = useCallback(async (chatId, signal) => {
     if (!chatId) {
       setMessages([]);
       return;
     }
 
     try {
-      const res = await fetch(`${NODE_BASE}/api/chat/${chatId}/messages`);
-      const data = await res.json();
+      const response = await fetch(`${NODE_BASE}/api/chat/${chatId}/messages`, { signal });
+      const data = await readResponse(response);
+      if (!Array.isArray(data)) throw new Error("The chat API returned an invalid message list.");
 
-      const formatted = data.map((m) => ({
-        id: m._id,
-        sender: m.sender === "bot" ? "bot" : "user",
-        text: m.text,
-        timestamp: m.timestamp,
-        pdfName: m.pdfName || "",
-      }));
-
-      setMessages(formatted);
-    } catch (err) {
-      console.error("loadMessagesForChat error:", err);
-      setMessages([]);
+      setMessages(
+        data.map((message) => ({
+          id: message._id,
+          sender: message.sender === "bot" ? "bot" : "user",
+          text: message.text,
+          timestamp: message.timestamp,
+          pdfName: message.pdfName || "",
+        }))
+      );
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        console.error("Could not load chat messages:", error);
+        setMessages([]);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (activeChatId) loadMessagesForChat(activeChatId);
-  }, [activeChatId]);
+    void loadChats();
+    void loadPdfList();
+  }, [loadChats, loadPdfList]);
 
-  /* ------------------ Create New Chat ------------------ */
-  const newChat = async (title) => {
+  useEffect(() => {
+    if (activeChatId && skipNextMessagesLoad.current === activeChatId) {
+      skipNextMessagesLoad.current = null;
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    void loadMessagesForChat(activeChatId, controller.signal);
+    return () => controller.abort();
+  }, [activeChatId, loadMessagesForChat]);
+
+  const newChat = useCallback(async (title) => {
     try {
-      const res = await fetch(`${NODE_BASE}/api/chat/new`, {
+      const response = await fetch(`${NODE_BASE}/api/chat/new`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title || `Chat ${chats.length + 1}` }),
+        body: JSON.stringify({ title: title?.trim() || `Chat ${chats.length + 1}` }),
       });
+      const chat = await readResponse(response);
+      if (!chat?._id) throw new Error("The chat API did not return a chat ID.");
 
-      const c = await res.json();
-
-      const cleaned = {
-        id: c._id,
-        title: c.title,
-      };
-
-      setChats((prev) => [cleaned, ...prev]);
+      const cleaned = { id: chat._id, title: chat.title };
+      setChats((previous) => [cleaned, ...previous.filter((item) => item.id !== cleaned.id)]);
+      skipNextMessagesLoad.current = cleaned.id;
       setActiveChatId(cleaned.id);
       setMessages([]);
-
       return cleaned;
-    } catch (err) {
-      console.error("newChat error:", err);
+    } catch (error) {
+      console.error("Could not create chat:", error);
+      alert(`Could not create a chat. Check that the Node backend and MongoDB are running.\n\n${error.message}`);
+      return null;
     }
-  };
+  }, [chats.length]);
 
-  /* ------------------ Rename Chat ------------------ */
-  const renameChat = async (chatId, newTitle) => {
+  const renameChat = useCallback(async (chatId, newTitle) => {
+    const title = newTitle?.trim();
+    if (!title) return;
+
     try {
-      const res = await fetch(`${NODE_BASE}/api/chat/${chatId}`, {
+      const response = await fetch(`${NODE_BASE}/api/chat/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle }),
+        body: JSON.stringify({ title }),
       });
-
-      const updated = await res.json();
-
-      setChats((prev) =>
-        prev.map((c) => (c.id === chatId ? { ...c, title: updated.title } : c))
+      const updated = await readResponse(response);
+      setChats((previous) =>
+        previous.map((chat) => (chat.id === chatId ? { ...chat, title: updated.title } : chat))
       );
-
       return updated;
-    } catch (err) {
-      console.error("renameChat error:", err);
+    } catch (error) {
+      console.error("Could not rename chat:", error);
+      alert(`Could not rename the chat: ${error.message}`);
+      return null;
     }
-  };
+  }, []);
 
-  /* ------------------ Upload PDF ------------------ */
-  const uploadPdf = async (file) => {
-    const apiKey = localStorage.getItem("api_key");
-    if (!apiKey) return alert("Add Gemini API key first");
+  const uploadPdf = useCallback(async (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      alert("Please select a PDF file.");
+      return null;
+    }
+
+    const apiKey = localStorage.getItem("api_key")?.trim();
+    if (!apiKey) {
+      alert("Add your Gemini API key in Settings first.");
+      return null;
+    }
+
+    let chatId = activeChatId;
+    if (!chatId) {
+      const created = await newChat();
+      if (!created) return;
+      chatId = created.id;
+    }
 
     const form = new FormData();
     form.append("file", file);
     form.append("api_key", apiKey);
 
     try {
-      const res = await fetch(`${PY_BACKEND}/upload-pdf`, {
+      const response = await fetch(`${PY_BACKEND}/upload-pdf`, {
         method: "POST",
         body: form,
       });
-
-      const data = await res.json();
-      if (data.error) return alert(data.error);
+      const data = await readResponse(response);
 
       setActivePdf(file.name);
       await loadPdfList();
 
-      // Insert into chat
-      const userMsg = {
+      const userMessage = {
         id: makeId(),
         sender: "user",
         text: `Uploaded PDF: ${file.name}`,
         timestamp: Date.now(),
+        pdfName: file.name,
       };
-      const botMsg = {
+      const botMessage = {
         id: makeId(),
         sender: "bot",
         text: `📄 "${file.name}" indexed successfully.`,
         timestamp: Date.now(),
+        pdfName: file.name,
       };
+      setMessages((previous) => [...previous, userMessage, botMessage]);
 
-      setMessages((prev) => [...prev, userMsg, botMsg]);
-
-      if (activeChatId) {
-        await saveMessageToNode({ 
-          chatId: activeChatId,
+      await Promise.all([
+        saveMessageToNode({
+          chatId,
           sender: "user",
-          text: userMsg.text,
-          timestamp: userMsg.timestamp,
-          pdfName: file.name
-        });
-
-        await saveMessageToNode({ 
-          chatId: activeChatId,
+          text: userMessage.text,
+          timestamp: userMessage.timestamp,
+          pdfName: file.name,
+        }),
+        saveMessageToNode({
+          chatId,
           sender: "bot",
-          text: botMsg.text,
-          timestamp: botMsg.timestamp,
-          pdfName: file.name
-        });
-      }
-    } catch (err) {
-      console.error("uploadPdf error:", err);
-    }
-  };
+          text: botMessage.text,
+          timestamp: botMessage.timestamp,
+          pdfName: file.name,
+        }),
+      ]).catch((error) => console.error("PDF indexed, but chat history could not be saved:", error));
 
-  /* ------------------ Load PDF List ------------------ */
-  const loadPdfList = async () => {
-    try {
-      const res = await fetch(`${PY_BACKEND}/list-pdfs`);
-      const data = await res.json();
-      setPdfList(data.pdfs || []);
-    } catch (err) {
-      console.error("loadPdfList error:", err);
+      return data;
+    } catch (error) {
+      console.error("Could not upload PDF:", error);
+      alert(`Could not index the PDF: ${error.message}`);
+      return null;
     }
-  };
+  }, [activeChatId, loadPdfList, newChat]);
 
-  /* ------------------ Delete PDF ------------------ */
-  const deletePdf = async (fileName) => {
-    if (!confirm(`Delete PDF '${fileName}'?`)) return;
+  const deletePdf = useCallback(async (fileName) => {
+    if (!window.confirm(`Delete PDF '${fileName}'?`)) return;
 
     try {
-      const res = await fetch(`${PY_BACKEND}/delete-pdf/${encodeURIComponent(fileName)}`, {
-        method: "DELETE",
-      });
-      await res.json();
+      const response = await fetch(
+        `${PY_BACKEND}/delete-pdf/${encodeURIComponent(fileName)}`,
+        { method: "DELETE" }
+      );
+      await readResponse(response);
 
-      if (activePdf === fileName) {
-        setActivePdf("");
-        setMessages([]);
-      }
-
+      if (activePdf === fileName) setActivePdf("");
       await loadPdfList();
-    } catch (err) {
-      console.error("deletePdf error:", err);
+    } catch (error) {
+      console.error("Could not delete PDF:", error);
+      alert(`Could not delete the PDF: ${error.message}`);
     }
-  };
+  }, [activePdf, loadPdfList]);
 
-  /* ------------------ Send Message ------------------ */
-  const sendMessage = async ({ text, file }) => {
-    const apiKey = localStorage.getItem("api_key");
-    if (!apiKey) return alert("Add API key");
+  const sendMessage = useCallback(async ({ text, file }) => {
+    if (file) return uploadPdf(file);
+    const question = text?.trim();
+    if (!question) return;
 
-    if (file) return await uploadPdf(file);
+    const apiKey = localStorage.getItem("api_key")?.trim();
+    if (!apiKey) {
+      alert("Add your Gemini API key in Settings first.");
+      return false;
+    }
 
     let chatId = activeChatId;
     if (!chatId) {
-      const newC = await newChat();
-      chatId = newC.id;
+      const created = await newChat();
+      if (!created) return false;
+      chatId = created.id;
     }
 
-    const userMsg = {
+    const userMessage = {
       id: makeId(),
       sender: "user",
-      text,
+      text: question,
       timestamp: Date.now(),
-    };
-
-    setMessages((p) => [...p, userMsg]);
-
-    saveMessageToNode({
-      chatId,
-      sender: "user",
-      text,
-      timestamp: userMsg.timestamp,
       pdfName: activePdf || "",
-    });
-
+    };
     const botId = makeId();
-    const botPlaceholder = {
+    const botMessage = {
       id: botId,
       sender: "bot",
       text: "",
       timestamp: Date.now(),
+      pdfName: activePdf || "",
     };
 
-    setMessages((p) => [...p, botPlaceholder]);
+    setMessages((previous) => [...previous, userMessage, botMessage]);
+    void saveMessageToNode({
+      chatId,
+      sender: "user",
+      text: userMessage.text,
+      timestamp: userMessage.timestamp,
+      pdfName: userMessage.pdfName,
+    }).catch((error) => console.error("Could not save user message:", error));
 
     try {
       const form = new FormData();
-      form.append("question", text);
+      form.append("question", question);
       form.append("api_key", apiKey);
       form.append("pdf_name", activePdf || "");
 
-      const res = await fetch(`${PY_BACKEND}/ask-stream`, {
+      const response = await fetch(`${PY_BACKEND}/ask-stream`, {
         method: "POST",
         body: form,
       });
 
-      if (!res.body) {
-        const fallback = await res.text();
-        setMessages((p) =>
-          p.map((m) => (m.id === botId ? { ...m, text: fallback } : m))
+      if (!response.ok) {
+        const data = await readResponse(response);
+        throw new Error(typeof data === "string" ? data : "The RAG backend rejected the question.");
+      }
+
+      if (!response.body) {
+        const fallback = await response.text();
+        setMessages((previous) =>
+          previous.map((message) => (message.id === botId ? { ...message, text: fallback } : message))
         );
+        await saveMessageToNode({
+          chatId,
+          sender: "bot",
+          text: fallback,
+          timestamp: Date.now(),
+          pdfName: activePdf || "",
+        });
         return;
       }
 
-      /* ---------- DEBOUNCED STREAMING ---------- */
-      const reader = res.body.getReader();
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
-
       let fullText = "";
-      let temp = "";
-      let updating = false;
-
-      const flush = () => {
-        setMessages((p) =>
-          p.map((m) => (m.id === botId ? { ...m, text: fullText } : m))
-        );
-        updating = false;
-        temp = "";
-      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-
-        fullText += chunk;
-        temp += chunk;
-
-        if (!updating) {
-          updating = true;
-          setTimeout(flush, 100);
-        }
+        fullText += decoder.decode(value, { stream: true });
+        setMessages((previous) =>
+          previous.map((message) => (message.id === botId ? { ...message, text: fullText } : message))
+        );
       }
 
-      saveMessageToNode({
+      fullText += decoder.decode();
+      const answerText = fullText || "No response was returned.";
+      setMessages((previous) =>
+        previous.map((message) => (message.id === botId ? { ...message, text: answerText } : message))
+      );
+
+      await saveMessageToNode({
         chatId,
         sender: "bot",
-        text: fullText,
+        text: answerText,
         timestamp: Date.now(),
         pdfName: activePdf || "",
       });
-    } catch (err) {
-      console.error("sendMessage error:", err);
-      setMessages((p) =>
-        p.map((m) =>
-          m.id === botId ? { ...m, text: `Error: ${err.message}` } : m
-        )
+      return true;
+    } catch (error) {
+      console.error("Could not get an answer:", error);
+      const errorText = `Error: ${error.message}`;
+      setMessages((previous) =>
+        previous.map((message) => (message.id === botId ? { ...message, text: errorText } : message))
       );
+      return false;
     }
-  };
+  }, [activeChatId, activePdf, newChat, uploadPdf]);
 
   return (
     <ChatContext.Provider
@@ -342,7 +377,6 @@ export const ChatProvider = ({ children }) => {
         messages,
         pdfList,
         activePdf,
-
         setActivePdf,
         sendMessage,
         newChat,
