@@ -1,0 +1,6 @@
+chroma_db/
+chroma_notes/
+chroma_stores/
+memory.js/
+__pycache__/
+api_test.py
