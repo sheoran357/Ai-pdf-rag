@@ -1,5 +1,7 @@
 import { createContext, useCallback, useEffect, useRef, useState } from "react";
 
+// The context object is intentionally exported alongside its provider.
+// eslint-disable-next-line react-refresh/only-export-components
 export const ChatContext = createContext(null);
 
 const NODE_BASE = (import.meta.env.VITE_NODE_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
