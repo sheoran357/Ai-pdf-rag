@@ -78,3 +78,7 @@ jobs:
         env:
           PYTHONPATH: backend/app
         run: python -c "import api; print(api.app.title)"
+      - name: Smoke-test PDF listing endpoint
+        env:
+          PYTHONPATH: backend/app
+        run: python -c "from fastapi.testclient import TestClient; import api; response = TestClient(api.app).get('/list-pdfs'); assert response.status_code == 200, response.text; print(response.json())"
